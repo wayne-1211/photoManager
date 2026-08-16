@@ -10,8 +10,6 @@
         href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="style.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 </head>
 
 <body>
@@ -21,10 +19,27 @@
         <nav class="tabs">
             <button class="tab-btn active" data-view="photosView">照片檢視</button>
             <button class="tab-btn" data-view="statsView">統計數據</button>
-            <button class="tab-btn" data-view="manageView">照片管理</button>
+            <button class="tab-btn" data-view="manageView">整理分類</button>
+            <button class="tab-btn" data-view="settingsView">分類設定</button>
             <button class="theme-toggle" id="themeToggle">☾ 深色模式</button>
         </nav>
     </header>
+
+    <!-- ============ 來源列（全域） ============ -->
+    <div class="source-bar">
+        <button class="upload-btn" id="pickFolderBtn">開啟照片資料夾</button>
+        <label class="check" title="連同子資料夾裡的照片一起讀入">
+            <input type="checkbox" id="recursiveChk"> 包含子資料夾
+        </label>
+        <div class="divider"></div>
+        <label class="ghost-btn" for="fileInput">改用選擇檔案</label>
+        <input id="fileInput" type="file" accept="image/jpeg,image/jpg,image/tiff" multiple>
+        <div class="source-info" id="sourceInfo">尚未選擇來源</div>
+        <button class="clear-btn" id="rescanBtn" hidden>重新掃描</button>
+        <button class="clear-btn" id="clearBtn">清除</button>
+    </div>
+
+    <div class="notice warn" id="fsWarn" hidden></div>
 
     <div class="progress-wrap" id="progressWrap">
         <div class="progress-track">
@@ -37,16 +52,22 @@
         <!-- ============ PHOTOS VIEW ============ -->
         <section id="photosView" class="view active">
             <div class="toolbar">
-                <label class="upload-btn" for="fileInput">上傳照片</label>
-                <input id="fileInput" type="file" accept="image/jpeg,image/jpg,image/tiff" multiple>
-                <div class="divider"></div>
                 <div class="control-group">
                     <label>每排卡片數</label>
                     <input type="range" id="colSlider" min="1" max="8" value="4">
                     <span class="col-count" id="colCount">4</span>
                 </div>
-                <div class="photo-count" id="photoCount">尚未上傳照片</div>
-                <button class="clear-btn" id="clearBtn">清除全部</button>
+                <div class="divider"></div>
+                <div class="control-group">
+                    <label>每頁張數</label>
+                    <select id="pageSizeSelect" class="mini-select">
+                        <option value="30">30</option>
+                        <option value="50" selected>50</option>
+                        <option value="100">100</option>
+                        <option value="200">200</option>
+                    </select>
+                </div>
+                <div class="photo-count" id="photoCount">尚未載入照片</div>
             </div>
 
             <details class="field-panel" id="fieldPanel">
@@ -58,25 +79,24 @@
             <div id="photosPagination" class="pagination"></div>
             <div id="emptyState" class="empty-state">
                 <div class="glyph">◎</div>
-                <p>還沒有照片。</p>
-                <p>點選「上傳照片」開始，支援多張 JPEG（Sony 相機拍攝的照片可解出創意風格 Creative Style）。每頁顯示 50 張，縮圖優先使用相機內建的 EXIF 縮圖以維持流暢度。</p>
+                <p>還沒有載入照片。</p>
+                <p>點「開啟照片資料夾」直接讀取本機資料夾——照片留在原地，不會上傳、不會複製一份到記憶體。</p>
+                <p class="dim">EXIF 與縮圖只在你翻到那一頁時才會讀取；縮圖優先使用相機內建的 EXIF 縮圖。</p>
             </div>
         </section>
 
         <!-- ============ STATS VIEW ============ -->
         <section id="statsView" class="view">
+            <div class="toolbar">
+                <button class="upload-btn" id="scanAllBtn">分析全部照片的 EXIF</button>
+                <div class="photo-count" id="statsProgress">尚未載入照片</div>
+            </div>
             <div class="stats-grid" id="statsGrid"></div>
         </section>
 
-        <!-- ============ MANAGE VIEW (照片管理/快捷分類/匯出) ============ -->
+        <!-- ============ MANAGE VIEW ============ -->
         <section id="manageView" class="view">
-            <div class="cat-editor" id="catEditor"></div>
-
-            <div class="drop-zone" id="dropZone">
-                <p>將照片拖曳到這裡，或 <b>點擊上傳</b>（與「照片檢視」共用同一批照片）</p>
-                <label class="upload-btn" for="manageFileInput">選擇照片</label>
-                <input id="manageFileInput" type="file" accept="image/jpeg,image/jpg,image/tiff" multiple>
-            </div>
+            <div class="cat-legend" id="catLegend"></div>
 
             <div class="manage-layout">
                 <div class="preview-panel">
@@ -85,29 +105,78 @@
                 </div>
 
                 <div class="thumb-sidebar">
-                    <div class="toolbar" style="margin-bottom:14px;">
+                    <div class="apply-box">
+                        <button class="export-btn" id="applyBtn">套用整理（在原資料夾移動檔案）</button>
+                        <button class="ghost-btn wide" id="exportBtn" hidden>打包下載 .zip（相容模式）</button>
+                        <div class="apply-hint" id="applyHint"></div>
+                        <div class="apply-result" id="applyResult" hidden></div>
+                    </div>
+
+                    <div class="toolbar compact">
                         <div class="control-group">
                             <label>每排縮圖數</label>
                             <input type="range" id="mgmtColSlider" min="2" max="6" value="3">
                             <span class="col-count" id="mgmtColCount">3</span>
                         </div>
-                        <div class="photo-count" id="mgmtPhotoCount">尚未上傳照片</div>
+                        <label class="check">
+                            <input type="checkbox" id="hideDoneChk"> 只看未分類
+                        </label>
+                        <div class="photo-count" id="mgmtPhotoCount">尚未載入照片</div>
                     </div>
-                    <button class="export-btn" id="exportBtn" style="width:100%; margin-bottom:14px;">匯出打包
-                        (.zip)</button>
+
                     <div id="manageGrid" class="manage-grid" style="grid-template-columns:repeat(3,1fr);"></div>
                     <div id="managePagination" class="pagination"></div>
                     <div id="manageEmpty" class="empty-state">
                         <div class="glyph">◎</div>
                         <p>還沒有照片可以分類。</p>
-                        <p>拖曳或點擊上方「選擇照片」開始上傳。</p>
+                        <p>先在上方選擇來源資料夾。</p>
                     </div>
                 </div>
             </div>
         </section>
+
+        <!-- ============ SETTINGS VIEW ============ -->
+        <section id="settingsView" class="view">
+            <div class="settings-head">
+                <div>
+                    <h2>照片分類</h2>
+                    <p class="dim">
+                        分類定義存在 <code>categories.json</code>，你在這裡的修改會存進瀏覽器，
+                        並可以匯出成 JSON 帶到別台電腦。<br>
+                        <b>移動</b>＝把檔案搬進該資料夾；<b>複製</b>＝原檔留著再複製一份；<b>只標記</b>＝不動檔案，只在畫面上做記號。
+                    </p>
+                </div>
+                <div class="settings-actions">
+                    <button class="ghost-btn" id="addCatBtn">＋ 新增分類</button>
+                    <button class="ghost-btn" id="exportCatBtn">匯出 JSON</button>
+                    <label class="ghost-btn" for="importCatInput">匯入 JSON</label>
+                    <input id="importCatInput" type="file" accept="application/json,.json">
+                    <button class="clear-btn" id="resetCatBtn">重設為預設</button>
+                </div>
+            </div>
+            <div class="cat-table" id="catTable"></div>
+        </section>
     </main>
 
-    <script src="script.js"></script>
+    <dialog class="app-modal" id="appModal" aria-labelledby="appModalTitle" aria-describedby="appModalMessage">
+        <form method="dialog" class="app-modal-card">
+            <div class="app-modal-icon" id="appModalIcon" aria-hidden="true"></div>
+            <div class="app-modal-content">
+                <h2 id="appModalTitle"></h2>
+                <p id="appModalMessage"></p>
+                <div class="app-modal-actions">
+                    <button class="ghost-btn" id="appModalCancel" value="cancel">取消</button>
+                    <button class="export-btn" id="appModalConfirm" value="confirm">確定</button>
+                </div>
+            </div>
+        </form>
+    </dialog>
+
+    <script src="js/exif.js"></script>
+    <script src="js/categories.js"></script>
+    <script src="js/library.js"></script>
+    <script src="js/organize.js"></script>
+    <script src="js/app.js"></script>
 </body>
 
 </html>
