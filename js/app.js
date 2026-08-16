@@ -56,6 +56,31 @@ function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/** 顯示一致的非阻斷式訊息／確認 Modal。確認模式回傳 true 或 false。 */
+function showModal({ title, message, tone = 'info', confirm = false, confirmText = '確定' }) {
+    const dialog = $('appModal');
+    const confirmBtn = $('appModalConfirm');
+    const cancelBtn = $('appModalCancel');
+    dialog.dataset.tone = tone;
+    $('appModalIcon').textContent = tone === 'danger' ? '!' : tone === 'success' ? '✓' : 'i';
+    $('appModalTitle').textContent = title;
+    $('appModalMessage').textContent = message;
+    confirmBtn.textContent = confirmText;
+    confirmBtn.classList.toggle('app-modal-confirm', tone === 'danger');
+    cancelBtn.hidden = !confirm;
+
+    return new Promise(resolve => {
+        const finish = () => {
+            document.body.classList.remove('modal-open');
+            resolve(dialog.returnValue === 'confirm');
+        };
+        dialog.addEventListener('close', finish, { once: true });
+        document.body.classList.add('modal-open');
+        dialog.showModal();
+        requestAnimationFrame(() => (confirm ? cancelBtn : confirmBtn).focus());
+    });
+}
+
 /* ---------- 進度列 ---------- */
 function showProgress(done, total, label) {
     $('progressWrap').classList.add('active');
@@ -125,7 +150,7 @@ async function openFolder() {
     } catch (err) {
         if (err && err.name === 'AbortError') { hideProgress(); return; }
         hideProgress();
-        alert('開啟資料夾失敗：' + (err && err.message ? err.message : err));
+        await showModal({ title: '無法開啟資料夾', message: err && err.message ? err.message : String(err), tone: 'danger' });
     }
 }
 
@@ -142,7 +167,7 @@ async function rescanFolder() {
         afterSourceChanged();
     } catch (err) {
         hideProgress();
-        alert('重新掃描失敗：' + (err && err.message ? err.message : err));
+        await showModal({ title: '重新掃描失敗', message: err && err.message ? err.message : String(err), tone: 'danger' });
     }
 }
 
@@ -755,10 +780,11 @@ $('applyBtn').addEventListener('click', async () => {
     if (!plan.total) return;
 
     const summary = plan.byFolder.map(b => `  ${b.folder}/  ${b.count} 張（${PMCategories.actionLabel(b.action)}）`).join('\n');
-    const ok = confirm(
-        `即將在資料夾「${PMLibrary.rootName}」內整理 ${plan.total} 張照片：\n\n${summary}\n\n`
-        + `「移動」會真的改變檔案在硬碟上的位置（不會經過資源回收筒）。確定要執行嗎？`
-    );
+    const ok = await showModal({
+        title: `整理 ${plan.total} 張照片？`,
+        message: `即將在資料夾「${PMLibrary.rootName}」內整理：\n\n${summary}\n\n「移動」會真的改變檔案在硬碟上的位置（不會經過資源回收筒）。`,
+        tone: 'danger', confirm: true, confirmText: '開始整理',
+    });
     if (!ok) return;
 
     const btn = $('applyBtn');
@@ -781,7 +807,7 @@ $('applyBtn').addEventListener('click', async () => {
                 : '');
     } catch (err) {
         hideProgress();
-        alert('整理失敗：' + (err && err.message ? err.message : err));
+        await showModal({ title: '整理失敗', message: err && err.message ? err.message : String(err), tone: 'danger' });
     } finally {
         btn.textContent = original;
         renderAll();
@@ -812,7 +838,10 @@ $('exportBtn').addEventListener('click', async () => {
     });
     let count = 0;
     groups.forEach(arr => count += arr.length);
-    if (!count) { alert('目前沒有可打包的照片。'); return; }
+    if (!count) {
+        await showModal({ title: '沒有可打包的照片', message: '請先替照片指定一個需要移動或複製的分類。' });
+        return;
+    }
 
     btn.disabled = true;
     const original = btn.textContent;
@@ -852,7 +881,7 @@ $('exportBtn').addEventListener('click', async () => {
         setTimeout(() => URL.revokeObjectURL(url), 60000);
     } catch (err) {
         console.error(err);
-        alert('打包失敗：' + (err && err.message ? err.message : err));
+        await showModal({ title: '打包失敗', message: err && err.message ? err.message : String(err), tone: 'danger' });
     } finally {
         btn.disabled = false;
         btn.textContent = original;
@@ -943,9 +972,13 @@ function renderCatTable() {
         down.onclick = () => { PMCategories.move(cat.id, 1); renderCatTable(); };
         const del = document.createElement('button');
         del.className = 'icon-btn danger'; del.textContent = '✕'; del.title = '刪除';
-        del.onclick = () => {
+        del.onclick = async () => {
             const used = PMLibrary.photos.filter(p => p.catId === cat.id).length;
-            if (used && !confirm(`有 ${used} 張照片標記為「${cat.name}」，刪除分類會一併清掉這些標記。確定嗎？`)) return;
+            if (used && !await showModal({
+                title: `刪除「${cat.name}」？`,
+                message: `有 ${used} 張照片使用這個分類，刪除後會一併清除這些標記。`,
+                tone: 'danger', confirm: true, confirmText: '刪除分類',
+            })) return;
             PMLibrary.photos.forEach(p => { if (p.catId === cat.id) p.catId = null; });
             PMCategories.remove(cat.id);
             saveMarks();
@@ -976,14 +1009,18 @@ $('importCatInput').addEventListener('change', async (e) => {
     if (!file) return;
     try {
         PMCategories.importJSON(await file.text());
-        alert('匯入成功。');
+        await showModal({ title: '匯入完成', message: '分類設定已成功匯入。', tone: 'success' });
     } catch (err) {
-        alert('匯入失敗：' + err.message);
+        await showModal({ title: '匯入失敗', message: err.message, tone: 'danger' });
     }
 });
 
 $('resetCatBtn').addEventListener('click', async () => {
-    if (!confirm('要把分類重設成 categories.json 的預設內容嗎？現有的自訂分類會消失。')) return;
+    if (!await showModal({
+        title: '重設所有分類？',
+        message: '分類將重設成 categories.json 的預設內容，現有的自訂分類會消失。',
+        tone: 'danger', confirm: true, confirmText: '重設分類',
+    })) return;
     await PMCategories.reset();
 });
 
@@ -1024,9 +1061,13 @@ $('fileInput').addEventListener('change', (e) => {
     e.target.value = '';
 });
 
-$('clearBtn').addEventListener('click', () => {
+$('clearBtn').addEventListener('click', async () => {
     if (!PMLibrary.photos.length) return;
-    if (!confirm(`確定要清除目前載入的 ${PMLibrary.photos.length} 張照片嗎？（只是把畫面清空，不會刪除你電腦上的檔案）`)) return;
+    if (!await showModal({
+        title: `清除 ${PMLibrary.photos.length} 張照片？`,
+        message: '只會清空目前畫面與分類標記，不會刪除電腦上的檔案。',
+        tone: 'danger', confirm: true, confirmText: '清除畫面',
+    })) return;
     PMLibrary.clear();
     selectedId = null;
     state.photosPage = 0;

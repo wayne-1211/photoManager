@@ -158,6 +158,20 @@
         </section>
     </main>
 
+    <dialog class="app-modal" id="appModal" aria-labelledby="appModalTitle" aria-describedby="appModalMessage">
+        <form method="dialog" class="app-modal-card">
+            <div class="app-modal-icon" id="appModalIcon" aria-hidden="true"></div>
+            <div class="app-modal-content">
+                <h2 id="appModalTitle"></h2>
+                <p id="appModalMessage"></p>
+                <div class="app-modal-actions">
+                    <button class="ghost-btn" id="appModalCancel" value="cancel">取消</button>
+                    <button class="export-btn" id="appModalConfirm" value="confirm">確定</button>
+                </div>
+            </div>
+        </form>
+    </dialog>
+
     <script src="js/exif.js"></script>
     <script src="js/categories.js"></script>
     <script src="js/library.js"></script>
