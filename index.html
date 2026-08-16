@@ -29,7 +29,7 @@
     <div class="source-bar">
         <button class="upload-btn" id="pickFolderBtn">開啟照片資料夾</button>
         <label class="check" title="連同子資料夾裡的照片一起讀入">
-            <input type="checkbox" id="recursiveChk"> 包含子資料夾
+            <input type="checkbox" id="recursiveChk" checked> 包含子資料夾
         </label>
         <div class="divider"></div>
         <label class="ghost-btn" for="fileInput">改用選擇檔案</label>
@@ -81,7 +81,7 @@
                 <div class="glyph">◎</div>
                 <p>還沒有載入照片。</p>
                 <p>點「開啟照片資料夾」直接讀取本機資料夾——照片留在原地，不會上傳、不會複製一份到記憶體。</p>
-                <p class="dim">EXIF 與縮圖只在你翻到那一頁時才會讀取；縮圖優先使用相機內建的 EXIF 縮圖。</p>
+                <p class="dim">EXIF 與縮圖只在你翻到那一頁時才會讀取；縮圖由本機原圖產生，照片不會上傳。</p>
             </div>
         </section>
 

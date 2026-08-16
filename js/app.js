@@ -918,27 +918,24 @@ function renderCatTable() {
         keyInput.type = 'text';
         keyInput.maxLength = 1;
         keyInput.value = cat.key;
+        keyInput.readOnly = true;
+        keyInput.title = cat.isTrash ? '廢片快捷鍵固定為 q' : '快捷鍵會依分類順序自動調整';
         keyInput.style.borderColor = cat.color;
-        keyInput.addEventListener('change', () => {
-            PMCategories.update(cat.id, { key: keyInput.value });
-            renderCatTable();
-        });
 
         const nameInput = document.createElement('input');
         nameInput.type = 'text';
         nameInput.value = cat.name;
+        nameInput.readOnly = cat.isTrash;
         nameInput.addEventListener('input', debounce(() => {
-            PMCategories.update(cat.id, { name: nameInput.value });
+            const updated = PMCategories.update(cat.id, { name: nameInput.value });
+            if (updated) folderInput.value = updated.folder;
         }, 300));
 
         const folderInput = document.createElement('input');
         folderInput.type = 'text';
         folderInput.value = cat.folder;
-        folderInput.placeholder = '資料夾名稱';
-        folderInput.addEventListener('change', () => {
-            PMCategories.update(cat.id, { folder: folderInput.value });
-            folderInput.value = PMCategories.byId(cat.id).folder;
-        });
+        folderInput.readOnly = true;
+        folderInput.title = cat.isTrash ? '廢片資料夾固定為 _廢片' : '目標資料夾會自動與分類名稱相同';
 
         const colorInput = document.createElement('input');
         colorInput.type = 'color';
@@ -959,19 +956,21 @@ function renderCatTable() {
         actionSelect.addEventListener('change', () => {
             PMCategories.update(cat.id, { action: actionSelect.value });
         });
+        actionSelect.disabled = cat.isTrash;
 
         const tools = document.createElement('div');
         tools.className = 'cat-tools';
         const up = document.createElement('button');
         up.className = 'icon-btn'; up.textContent = '↑'; up.title = '往上移';
-        up.disabled = idx === 0;
+        up.disabled = cat.isTrash || idx === 0;
         up.onclick = () => { PMCategories.move(cat.id, -1); renderCatTable(); };
         const down = document.createElement('button');
         down.className = 'icon-btn'; down.textContent = '↓'; down.title = '往下移';
-        down.disabled = idx === cats.length - 1;
+        down.disabled = cat.isTrash || idx === cats.length - 2;
         down.onclick = () => { PMCategories.move(cat.id, 1); renderCatTable(); };
         const del = document.createElement('button');
         del.className = 'icon-btn danger'; del.textContent = '✕'; del.title = '刪除';
+        del.disabled = cat.isTrash;
         del.onclick = async () => {
             const used = PMLibrary.photos.filter(p => p.catId === cat.id).length;
             if (used && !await showModal({
@@ -1009,6 +1008,7 @@ $('importCatInput').addEventListener('change', async (e) => {
     if (!file) return;
     try {
         PMCategories.importJSON(await file.text());
+        renderCatTable();
         await showModal({ title: '匯入完成', message: '分類設定已成功匯入。', tone: 'success' });
     } catch (err) {
         await showModal({ title: '匯入失敗', message: err.message, tone: 'danger' });
@@ -1022,6 +1022,7 @@ $('resetCatBtn').addEventListener('click', async () => {
         tone: 'danger', confirm: true, confirmText: '重設分類',
     })) return;
     await PMCategories.reset();
+    renderCatTable();
 });
 
 PMCategories.onChange(() => {
@@ -1032,7 +1033,8 @@ PMCategories.onChange(() => {
     });
     if (dropped) saveMarks();
 
-    renderCatTable();
+    // 輸入欄的即時儲存也會觸發 onChange。若在這裡重建整張表格，
+    // 目前的 input 會被移除而立即失去焦點。表格結構變動由各操作明確重繪。
     renderCatLegend();
     renderApplyHint();
     if (isManageViewActive()) renderManage();

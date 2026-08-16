@@ -208,11 +208,12 @@ const PMLibrary = (function () {
             if (parsed && parsed.info) { photo.info = parsed.info; photo.infoState = 'done'; }
             else if (photo.infoState !== 'done') { photo.infoState = 'error'; }
 
-            let blob = parsed ? parsed.thumbBlob : null;
-            if (!blob) {
-                try { blob = await makeThumbBlob(file); }
-                catch (e) { console.warn('產生縮圖失敗：', photo.name, e); }
-            }
+            // 優先從原圖縮放，畫質比相機內嵌的低解析 EXIF 縮圖好。
+            // 所有處理都在瀏覽器本機完成；僅在瀏覽器無法解碼原圖（例如部分 TIFF）時後備使用 EXIF 縮圖。
+            let blob = null;
+            try { blob = await makeThumbBlob(file); }
+            catch (e) { console.warn('無法從原圖產生縮圖，改用 EXIF 縮圖：', photo.name, e); }
+            if (!blob && parsed) blob = parsed.thumbBlob;
             if (blob) {
                 photo.thumbUrl = URL.createObjectURL(blob);
                 photo.thumbState = 'done';
