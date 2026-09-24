@@ -21,6 +21,10 @@ export const ROUTES = {
     fragment: "pages/organize.html", module: "../pages/organize.js",
     label: "整理分類", icon: "layers", nav: true, group: "照片管理", source: true,
   },
+  rename: {
+    fragment: "pages/rename.html", module: "../pages/rename.js",
+    label: "批次改名", icon: "copy", nav: true, group: "照片管理", source: true,
+  },
   settings: {
     fragment: "pages/settings.html", module: "../pages/settings.js",
     label: "分類設定", icon: "sliders", nav: true, group: "照片管理",

@@ -91,6 +91,108 @@ const PMExif = (function () {
         return v == null ? null : (Math.round(v * Math.pow(10, digits)) / Math.pow(10, digits));
     }
 
+    /* ---------- 2b. 完整檢視用: 標籤名稱與 GPS ---------- */
+    /**
+     * 標籤編號 → 名稱。給「完整資訊」裡的 Raw EXIF 用的,
+     * 查不到的就照原樣顯示成 0x____ —— 相機廠商的私有欄位本來就沒有公開名字。
+     */
+    const TAG_NAMES = {
+        ifd0: {
+            0x0100: 'ImageWidth', 0x0101: 'ImageLength', 0x0102: 'BitsPerSample',
+            0x0103: 'Compression', 0x0106: 'PhotometricInterpretation',
+            0x010E: 'ImageDescription', 0x010F: 'Make', 0x0110: 'Model',
+            0x0112: 'Orientation', 0x011A: 'XResolution', 0x011B: 'YResolution',
+            0x0128: 'ResolutionUnit', 0x0131: 'Software', 0x0132: 'DateTime',
+            0x013B: 'Artist', 0x0213: 'YCbCrPositioning', 0x8298: 'Copyright',
+            0x8769: 'ExifIFDPointer', 0x8825: 'GPSInfoIFDPointer',
+        },
+        exif: {
+            0x829A: 'ExposureTime', 0x829D: 'FNumber', 0x8822: 'ExposureProgram',
+            0x8827: 'ISOSpeedRatings', 0x8830: 'SensitivityType', 0x8832: 'RecommendedExposureIndex',
+            0x9000: 'ExifVersion', 0x9003: 'DateTimeOriginal', 0x9004: 'DateTimeDigitized',
+            0x9010: 'OffsetTime', 0x9011: 'OffsetTimeOriginal',
+            0x9101: 'ComponentsConfiguration', 0x9102: 'CompressedBitsPerPixel',
+            0x9201: 'ShutterSpeedValue', 0x9202: 'ApertureValue', 0x9203: 'BrightnessValue',
+            0x9204: 'ExposureBiasValue', 0x9205: 'MaxApertureValue', 0x9206: 'SubjectDistance',
+            0x9207: 'MeteringMode', 0x9208: 'LightSource', 0x9209: 'Flash',
+            0x920A: 'FocalLength', 0x927C: 'MakerNote', 0x9286: 'UserComment',
+            0x9290: 'SubSecTime', 0x9291: 'SubSecTimeOriginal', 0x9292: 'SubSecTimeDigitized',
+            0xA000: 'FlashpixVersion', 0xA001: 'ColorSpace',
+            0xA002: 'PixelXDimension', 0xA003: 'PixelYDimension',
+            0xA20E: 'FocalPlaneXResolution', 0xA20F: 'FocalPlaneYResolution',
+            0xA210: 'FocalPlaneResolutionUnit', 0xA217: 'SensingMethod',
+            0xA300: 'FileSource', 0xA301: 'SceneType', 0xA401: 'CustomRendered',
+            0xA402: 'ExposureMode', 0xA403: 'WhiteBalance', 0xA404: 'DigitalZoomRatio',
+            0xA405: 'FocalLengthIn35mmFilm', 0xA406: 'SceneCaptureType',
+            0xA407: 'GainControl', 0xA408: 'Contrast', 0xA409: 'Saturation',
+            0xA40A: 'Sharpness', 0xA40C: 'SubjectDistanceRange', 0xA420: 'ImageUniqueID',
+            0xA430: 'CameraOwnerName', 0xA431: 'BodySerialNumber',
+            0xA432: 'LensSpecification', 0xA433: 'LensMake', 0xA434: 'LensModel',
+            0xA435: 'LensSerialNumber',
+        },
+        gps: {
+            0x0000: 'GPSVersionID', 0x0001: 'GPSLatitudeRef', 0x0002: 'GPSLatitude',
+            0x0003: 'GPSLongitudeRef', 0x0004: 'GPSLongitude', 0x0005: 'GPSAltitudeRef',
+            0x0006: 'GPSAltitude', 0x0007: 'GPSTimeStamp', 0x0008: 'GPSSatellites',
+            0x0009: 'GPSStatus', 0x000A: 'GPSMeasureMode', 0x000B: 'GPSDOP',
+            0x000C: 'GPSSpeedRef', 0x000D: 'GPSSpeed', 0x0010: 'GPSImgDirectionRef',
+            0x0011: 'GPSImgDirection', 0x0012: 'GPSMapDatum', 0x001D: 'GPSDateStamp',
+        },
+    };
+
+    /** 度／分／秒 → 十進位度數。 */
+    function dmsToDegrees(dms, ref) {
+        if (!Array.isArray(dms) || dms.length < 3) return null;
+        const d = dms[0], m = dms[1], sec = dms[2];
+        if (d == null || m == null || sec == null) return null;
+        const value = Math.abs(d) + Math.abs(m) / 60 + Math.abs(sec) / 3600;
+        const negative = ref === 'S' || ref === 'W';
+        return negative ? -value : value;
+    }
+
+    function parseGps(gpsIfd) {
+        if (!gpsIfd) return null;
+        const g = (id) => gpsIfd.tags.has(id) ? gpsIfd.tags.get(id).value : null;
+        const latRef = g(0x0001);
+        const lonRef = g(0x0003);
+        const lat = dmsToDegrees(g(0x0002), latRef);
+        const lon = dmsToDegrees(g(0x0004), lonRef);
+        if (lat == null || lon == null) return null;
+        const altRaw = g(0x0006);
+        return {
+            latitude: lat,
+            longitude: lon,
+            latitudeRef: latRef || (lat >= 0 ? 'N' : 'S'),
+            longitudeRef: lonRef || (lon >= 0 ? 'E' : 'W'),
+            altitude: altRaw == null ? null : (g(0x0005) === 1 ? -altRaw : altRaw),
+        };
+    }
+
+    /** 把一個 IFD 攤平成「名稱 + 看得懂的值」, 給 Raw EXIF 那一段用。 */
+    function dumpIFD(ifd, kind) {
+        if (!ifd) return [];
+        const names = TAG_NAMES[kind] || {};
+        const rows = [];
+        ifd.tags.forEach((entry, id) => {
+            let value = entry.value;
+            if (value && typeof value === 'object' && Array.isArray(value.raw)) {
+                // 未定義型別（7）就只說有多長: 把幾千個位元組印出來沒有意義。
+                value = '<' + value.raw.length + ' bytes>';
+            } else if (Array.isArray(value)) {
+                value = value.length > 16
+                    ? value.slice(0, 16).join(', ') + '\u2026'
+                    : value.join(', ');
+            }
+            rows.push({
+                id: id,
+                tag: '0x' + id.toString(16).toUpperCase().padStart(4, '0'),
+                name: names[id] || null,
+                value: value == null ? '' : String(value),
+            });
+        });
+        return rows.sort((a, b) => a.id - b.id);
+    }
+
     function parseStandardExif(dv, tiffStart, little) {
         const ifd0 = readIFD(dv, tiffStart + dv.getUint32(tiffStart + 4, little), tiffStart, little);
         const info = { make: null, model: null, software: null, dateTime: null };
@@ -130,9 +232,23 @@ const PMExif = (function () {
             info.sceneCaptureType = SCENE_CAPTURE[g(0xA406)] ?? null;
             info.lensModel = g(0xA434);
 
+            // 像素尺寸: EXIF 自己就有, 不必把整張圖解出來才知道多大。
+            info.width = g(0xA002) ?? get(ifd0, 0x0100) ?? null;
+            info.height = g(0xA003) ?? get(ifd0, 0x0101) ?? null;
+
             if (exifIfd.tags.has(0x927C)) makerNoteEntry = exifIfd.tags.get(0x927C);
         }
-        return { info, makerNoteEntry, exifIfd, ifd0Next: ifd0.next };
+
+        let gpsIfd = null;
+        if (ifd0.tags.has(0x8825)) {
+            try {
+                const gpsOffset = tiffStart + dv.getUint32(ifd0.tags.get(0x8825).valueOffsetPos, little);
+                gpsIfd = readIFD(dv, gpsOffset, tiffStart, little);
+            } catch (e) { gpsIfd = null; }
+        }
+        info.gps = parseGps(gpsIfd);
+
+        return { info, makerNoteEntry, exifIfd, gpsIfd, ifd0, ifd0Next: ifd0.next };
     }
 
     /* ---------- 3. Sony MakerNote：Creative Style ---------- */
@@ -356,7 +472,18 @@ const PMExif = (function () {
         if (tiffStart + 8 > dv.byteLength) return { info: null, thumbBlob: null };
         const little = dv.getUint16(tiffStart) === 0x4949;
 
-        const { info, makerNoteEntry, ifd0Next } = parseStandardExif(dv, tiffStart, little);
+        const { info, makerNoteEntry, exifIfd, gpsIfd, ifd0, ifd0Next } =
+            parseStandardExif(dv, tiffStart, little);
+
+        // Raw EXIF 只有「完整資訊」那個視窗要, 平常整批掃的時候不做 —— 一張照片
+        // 幾百個欄位, 全部留在記憶體裡對幾千張的資料夾是不必要的負擔。
+        if (opts && opts.wantRaw) {
+            info.raw = {
+                ifd0: dumpIFD(ifd0, 'ifd0'),
+                exif: dumpIFD(exifIfd, 'exif'),
+                gps: dumpIFD(gpsIfd, 'gps'),
+            };
+        }
 
         if (makerNoteEntry && info.make && info.make.toUpperCase().indexOf("SONY") !== -1) {
             const mnAbsOffset = makerNoteEntry.count > 4

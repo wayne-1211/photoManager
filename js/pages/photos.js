@@ -15,6 +15,7 @@ import { showProgress, hideProgress, renderSourceInfo } from "../app/source.js";
 import {
   FILTER_FIELDS, optionsFor, applyFilters, activeCount,
 } from "../app/photo-filter.js";
+import { openInspector } from "../app/exif-inspector.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -55,16 +56,16 @@ async function openIn(route, photo) {
   }
 }
 
-/** 點一張照片 → 選一個工具。工具多了就是多一列, 版面不會擠。 */
+/** 按縮圖上那顆工具鈕 → 選一個工具。工具多了就是多一列, 版面不會擠。 */
 function openToolMenu(photo) {
   const list = el("div", { class: "tool-menu" },
-    ...editTargets().map((target) => el("button", {
+    ...editTargets().map((t) => el("button", {
       type: "button",
       class: "tool-menu-item",
-      onclick: () => { closeModal(); openIn(target.route, photo); },
+      onclick: () => { closeModal(); openIn(t.route, photo); },
     },
-    el("span", { class: "tool-menu-ico", html: icon(target.icon, { size: "18px" }) }),
-    el("span", { class: "tool-menu-label" }, target.label),
+    el("span", { class: "tool-menu-ico", html: icon(t.icon, { size: "18px" }) }),
+    el("span", { class: "tool-menu-label" }, t.label),
     el("span", { class: "tool-menu-go", html: icon("arrow-right", { size: "14px" }) }),
     )),
   );
@@ -333,7 +334,8 @@ function renderGrid() {
     img.alt = p.name;
     thumbWrap.appendChild(img);
 
-    // 快捷只有一顆: 按下去才挑工具, 以後工具再多也不會把縮圖蓋滿。
+    // 縮圖上的快捷只有一顆, 而且只做一件事: 挑編輯工具。
+    // 以後工具再多也只是清單多一列, 不會把縮圖蓋滿。
     const openBtn = document.createElement("button");
     openBtn.type = "button";
     openBtn.className = "card-open";
@@ -343,8 +345,8 @@ function renderGrid() {
     openBtn.addEventListener("click", (e) => { e.stopPropagation(); openToolMenu(p); });
     thumbWrap.appendChild(openBtn);
 
-    // 點縮圖任一處都可以開, 觸控也不必先叫出按鈕。
-    thumbWrap.addEventListener("click", () => openToolMenu(p));
+    // 點照片本身就是「我想看清楚這張是什麼」—— 直接開完整資訊。
+    thumbWrap.addEventListener("click", () => openInspector(p));
 
     if (p.catId) {
       const cat = PMCategories.byId(p.catId);

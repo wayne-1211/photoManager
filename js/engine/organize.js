@@ -135,5 +135,54 @@ const PMOrganize = (function () {
         return result;
     }
 
-    return { plan, run };
+    /* ============================================================
+       就地改名
+       ------------------------------------------------------------
+       檔案不換資料夾, 只換名字。優先用 handle.move(newName)（不搬資料,
+       瞬間完成）; 瀏覽器沒有這個方法時退回「複製一份新的、刪掉舊的」。
+       ============================================================ */
+    async function renameOne(photo, newName) {
+        if (!newName || newName === photo.name) return photo.name;
+        const dir = photo.parent;
+
+        if (typeof photo.handle?.move === 'function') {
+            const target = dir ? await uniqueName(dir, newName) : newName;
+            await photo.handle.move(target);
+            photo.name = target;
+            return target;
+        }
+
+        if (!dir) throw new Error('這個瀏覽器不支援就地改名');
+        const target = await uniqueName(dir, newName);
+        const fh = await copyFile(photo, dir, target);
+        await dir.removeEntry(photo.name);
+        photo.handle = fh;
+        photo.name = target;
+        return target;
+    }
+
+    /**
+     * 整批改名。
+     * @param {Array<{photo:object, name:string}>} items
+     * @param {(done:number,total:number)=>void} onProgress
+     */
+    async function rename(items, onProgress) {
+        const result = { renamed: 0, failed: [] };
+        for (let i = 0; i < items.length; i++) {
+            const { photo, name } = items[i];
+            try {
+                const final = await renameOne(photo, name);
+                // relPath 是拿來顯示與記標記的, 換了名字也要跟著換。
+                const slash = photo.relPath.lastIndexOf('/');
+                photo.relPath = slash >= 0 ? photo.relPath.slice(0, slash + 1) + final : final;
+                result.renamed++;
+            } catch (e) {
+                result.failed.push({ name: photo.name, message: e?.message || String(e) });
+            }
+            if (onProgress) onProgress(i + 1, items.length);
+        }
+        return result;
+    }
+
+    return { plan, run, rename };
 })();

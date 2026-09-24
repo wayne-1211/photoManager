@@ -450,6 +450,177 @@ input[type=file] {
     text-overflow: ellipsis;
 }
 
+/* ============================================================
+   大圖檢視器（整理分類頁左邊）
+   ------------------------------------------------------------
+   一格是一張照片。平移縮放寫在 .vw-stage 上,
+   <img> 自己的 transform 留給 EXIF 方向修正 —— 兩者不打架。
+   ============================================================ */
+.vw {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.vw-board {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    gap: 6px;
+    border-radius: var(--radius-sm);
+    background: var(--thumb-bg);
+    overflow: hidden;
+}
+
+/* 拖著縮圖經過時, 整塊亮一圈說明「放這裡會變成對照」。 */
+.vw-board.is-drop {
+    outline: 2px dashed var(--accent);
+    outline-offset: -4px;
+}
+
+.vw-pane {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: none;
+}
+
+.vw-board.is-compare .vw-pane + .vw-pane {
+    border-left: 1px solid var(--line);
+}
+
+.vw-pane.is-zoomed { cursor: grab; }
+.vw-pane.is-panning { cursor: grabbing; }
+
+.vw-stage {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform-origin: center center;
+    will-change: transform;
+}
+
+.vw-stage img {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    display: block;
+    image-orientation: none;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+/* 正在偷看下一張: 給一道細邊框, 不然会分不出來看的是哪一張。 */
+.vw-pane.is-peek::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 2px solid var(--accent);
+    pointer-events: none;
+}
+
+/* 檔名只在對照時需要 —— 單張時底下的資訊列已經寫了。 */
+.vw-name {
+    position: absolute;
+    top: 6px;
+    left: 8px;
+    right: 8px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: #fff;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    display: none;
+}
+
+.vw-board.is-compare .vw-name { display: block; }
+
+.vw-pane-x {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    border-radius: 8px;
+    background: rgba(18, 18, 18, 0.86);
+    color: #fff;
+    cursor: pointer;
+    transition: background var(--duration-fast) var(--ease);
+}
+
+.vw-pane-x:hover { background: var(--danger); border-color: transparent; }
+
+.vw-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
+.vw-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--line);
+    /* 30px 的短邊, 9px 圓角在 1/3 以內。 */
+    border-radius: 9px;
+    background: var(--bg-2);
+    color: var(--muted);
+    cursor: pointer;
+    transition: color var(--duration-fast) var(--ease),
+                border-color var(--duration-fast) var(--ease),
+                background var(--duration-fast) var(--ease),
+                transform var(--duration-fast) var(--ease);
+}
+
+.vw-btn:hover { color: var(--text); border-color: var(--accent); }
+.vw-btn:active { transform: scale(0.94); }
+.vw-btn.is-on {
+    color: var(--on-primary);
+    background: var(--primary);
+    border-color: transparent;
+}
+
+.vw-zoom {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* 被拖著的那張縮圖淡一點, 才知道正在搬的是它。 */
+.thumb-card.is-dragging { opacity: 0.4; }
+
+/* 對照中的第二張: 用虛線邊框跟主要那張區分開。 */
+.thumb-card.compare::after {
+    opacity: 1;
+    border-style: dashed;
+}
+
 /* 左側大圖預覽區(Master) */
 .preview-panel {
     background: var(--bg-2);
@@ -478,31 +649,6 @@ input[type=file] {
     font-weight: 600;
     margin: 0 0 12px;
     color: var(--text);
-}
-
-.preview-image-box {
-    position: relative;
-    width: 100%;
-    min-width: 0;
-    /* 撐滿面板剩下的高度: 資訊收合時圖就大, 展開時圖自己讓位。 */
-    flex: 1 1 auto;
-    min-height: 0;
-    border-radius: var(--radius-sm);
-    background: var(--thumb-bg);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-}
-
-.preview-image-box img {
-    max-width: 100%;
-    max-height: 100%;
-    width: auto;
-    height: auto;
-    object-fit: contain;
-    display: block;
-    image-orientation: none;
 }
 
 .preview-cat-badge {
@@ -876,23 +1022,6 @@ input[type=file] {
     line-height: 1.7;
 }
 
-/* 拖曳提示 */
-body.dragging::after {
-    content: "放開以載入照片或資料夾";
-    position: fixed;
-    inset: 0;
-    z-index: 99;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: var(--font-family);
-    font-size: 18px;
-    color: var(--accent);
-    background: rgba(0, 0, 0, .45);
-    border: 3px dashed var(--accent);
-    pointer-events: none;
-}
-
 /* ============================================================
    分類圖例（整理分類頁上方）
    ============================================================ */
@@ -966,23 +1095,38 @@ body.dragging::after {
 /* ============================================================
    套用整理
    ============================================================ */
+/*
+ * 右欄上面那兩塊是配角: 主角是下面那片縮圖, 所以壓到最小可讀的尺寸。
+ * 高度寫死: 標記一張、清掉一張, 下面那段計畫的行數就會變 —— 讓它去撐高度的話
+ * 整片縮圖會跟著上下跳, 而你正在點的就是那片縮圖。多出來的行數在裡面自己捲。
+ */
 .apply-box {
     background: var(--bg-2);
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    padding: 14px;
-    margin-bottom: 14px;
+    padding: 9px 10px;
+    margin-bottom: 9px;
+    height: 124px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
-.apply-box .export-btn {
+.apply-box .export-btn,
+.apply-box .ghost-btn {
     width: 100%;
+    flex: 0 0 auto;
 }
 
 .apply-hint {
-    margin-top: 10px;
-    font-size: 11.5px;
+    margin-top: 7px;
+    font-size: 11px;
     color: var(--muted);
     line-height: 1.7;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
 }
 
 .apply-hint b {
@@ -995,8 +1139,11 @@ body.dragging::after {
 }
 
 .apply-result {
-    margin-top: 10px;
-    padding: 9px 11px;
+    margin-top: 7px;
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 7px 9px;
     border-radius: var(--radius-sm);
     font-size: 11.5px;
     line-height: 1.7;
@@ -1013,9 +1160,21 @@ body.dragging::after {
 }
 
 .toolbar.compact {
-    padding: 10px 14px;
-    gap: 14px;
-    margin-bottom: 14px;
+    padding: 6px 10px;
+    gap: 10px;
+    margin-bottom: 9px;
+}
+
+.toolbar.compact .control-group { gap: 7px; }
+.toolbar.compact input[type=range] { width: 96px; }
+
+/* 統計那一串很長, 跟控制項擠在同一列會把整塊撞成兩行高。
+   讓它自己一行, 不吃控制項的高度, 整塊就矮了一截。 */
+.toolbar.compact .photo-count {
+    flex: 1 0 100%;
+    margin-left: 0;
+    min-height: 0;
+    font-size: 10.5px;
 }
 
 /* ============================================================
@@ -1581,4 +1740,165 @@ body.dragging::after {
     #grid.grid {
         grid-template-columns: minmax(0, 1fr) !important;
     }
+}
+
+
+/* ============================================================
+   批次改名
+   ============================================================ */
+.rn-bar {
+    margin-bottom: 12px;
+}
+
+.rn-pattern {
+    flex: 1 1 320px;
+    min-width: 220px;
+}
+
+.rn-input {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--text);
+    background: var(--bg-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 0 10px;
+    height: var(--control-height);
+    min-width: 0;
+    width: 100%;
+}
+
+.rn-input:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.rn-num {
+    width: 64px;
+    flex: 0 0 auto;
+}
+
+/* Token 一排小牌: 左邊是 token, 右邊是它會變成什麼 —— 說明就是例子本身。 */
+.rn-tokens {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.rn-token {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 9px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg-2);
+    cursor: pointer;
+    transition: border-color var(--duration-fast) var(--ease),
+                transform var(--duration-fast) var(--ease);
+}
+
+.rn-token:hover { border-color: var(--accent); }
+.rn-token:active { transform: scale(0.96); }
+.rn-token:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+
+.rn-token code {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--accent);
+}
+
+.rn-token span {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--muted);
+}
+
+.rn-regex {
+    margin-bottom: 12px;
+}
+
+.rn-regex > summary {
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    list-style: none;
+    padding: 4px 0;
+}
+
+.rn-regex > summary::-webkit-details-marker { display: none; }
+.rn-regex > summary::before { content: "› "; }
+.rn-regex[open] > summary::before { content: "⌄ "; }
+
+.rn-regex-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding-top: 6px;
+}
+
+.rn-regex-row .rn-input { flex: 1 1 200px; }
+
+.rn-regex-note {
+    font-size: 11.5px;
+    color: var(--muted);
+}
+
+.rn-regex-note.is-bad { color: var(--danger); }
+
+.rn-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 14px;
+}
+
+.rn-summary {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.rn-summary b { color: var(--text); }
+.rn-warn { color: var(--danger); }
+
+.rn-actions .apply-result { flex: 1 0 100%; margin-top: 0; }
+
+/* 一列一張照片: 左邊原本的名字, 右邊改完的。 */
+.rn-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.rn-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+.rn-row:nth-child(odd) { background: var(--bg-2); }
+
+.rn-old { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rn-arrow { color: var(--text-dim); text-align: center; }
+.rn-new { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 沒有變化的那幾列淡掉, 一眼就看得出這次會動到誰。 */
+.rn-row.is-same .rn-new { color: var(--text-dim); }
+.rn-row.is-dup .rn-new { color: var(--danger); }
+.rn-row.is-dup .rn-new::after { content: " ⚠"; }
+
+@media (max-width: 620px) {
+    .rn-row {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 2px;
+    }
+    .rn-arrow { display: none; }
 }

@@ -284,3 +284,121 @@
 .tool-menu-label { flex: 1 1 auto; min-width: 0; }
 .tool-menu-go { display: inline-flex; color: var(--text-dim); }
 .tool-menu-item:hover .tool-menu-go { color: var(--text-muted); }
+
+
+/* ============================================================
+   完整資訊（EXIF Inspector）
+   ============================================================ */
+.ins {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+
+/* 分頁列。項目多了就橫捲, 不換行 —— 換行會讓對話框的內容區忽高忽低。 */
+.ins-tabs {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.ins-tabs::-webkit-scrollbar { display: none; }
+
+.ins-tab {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--card-bg-alt);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--text-supporting);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease),
+              color var(--duration-fast) var(--ease);
+}
+.ins-tab:hover { color: var(--text); }
+.ins-tab.is-active {
+  color: var(--on-primary);
+  background: var(--primary);
+}
+.ins-tab:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+
+.ins-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ins-rows {
+  display: grid;
+  grid-template-columns: minmax(96px, auto) minmax(0, 1fr);
+  gap: 6px 16px;
+  margin: 0;
+}
+
+.ins-rows dt {
+  color: var(--text-muted);
+  font-size: var(--text-supporting);
+  white-space: nowrap;
+}
+
+.ins-rows dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-supporting);
+  color: var(--text);
+  word-break: break-word;
+}
+
+.ins-empty {
+  margin: 0;
+  padding: 24px 0;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+.ins-raw-head {
+  margin: 14px 0 6px;
+  font-size: var(--text-supporting);
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+.ins-raw-head:first-child { margin-top: 0; }
+
+.ins-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  table-layout: fixed;
+}
+
+.ins-table td {
+  padding: 3px 8px 3px 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.ins-tag { width: 68px; color: var(--text-dim); }
+.ins-name { width: 38%; color: var(--text-muted); }
+.ins-val {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ins-foot {
+  font-family: var(--font-mono);
+  font-size: var(--text-supporting);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}

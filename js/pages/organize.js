@@ -9,11 +9,37 @@ import {
   state, fmtBytes, saveMarks, Marks, onLibraryChange, attachThumb, renderPagination,
 } from "../app/state.js";
 import { showProgress, hideProgress } from "../app/source.js";
+import { createViewer } from "./organize-viewer.js";
 
 const $ = (id) => document.getElementById(id);
 
 /** 照片資訊那一塊是開是合。預設收起來, 展開之後換照片也維持展開。 */
 let infoOpen = false;
+/** 左右對照時, 右邊那一格是哪一張。null = 只看一張。 */
+let compareId = null;
+/** 大圖檢視器。整頁重畫時會沿用同一個, 平移縮放才不會每次歸零。 */
+let viewer = null;
+/** 正在偷看下一張時的還原資料。 */
+let peek = null;
+/** 縮圖側欄目前畫的是第幾頁。換選取但還在同一頁的話就不必整片重畫。 */
+let renderedPage = -1;
+
+function photoById(id) {
+  return id ? PMLibrary.photos.find((p) => p.id === id) || null : null;
+}
+
+function exitCompare(keepId) {
+  compareId = null;
+  if (keepId) selectManagedPhoto(keepId);
+  updateSelection();
+}
+
+function setCompare(id) {
+  const photo = photoById(id);
+  if (!photo || photo.id === state.selectedId) return;
+  compareId = photo.id;
+  updateSelection();
+}
 
 function manageList() {
   return state.hideDone ? PMLibrary.photos.filter((p) => !p.catId) : PMLibrary.photos;
@@ -85,7 +111,10 @@ function markCurrent(cat) {
   const after = manageList();
   const nextIdx = state.hideDone ? Math.min(i, after.length - 1) : Math.min(i + 1, after.length - 1);
   selectManagedPhoto(after[nextIdx] ? after[nextIdx].id : null);
-  renderManage();
+  // 「只看未分類」開著的時候這一標就會讓清單變短, 那只能整片重畫; 其他時候
+  // 只有這一張的角標變了, 換掉它就好。
+  if (state.hideDone) renderManage();
+  else { paintCardBadge(photo); updateSelection(); }
   renderCatLegend();
   renderApplyHint();
 }
@@ -96,7 +125,8 @@ function clearCurrentMark() {
   if (!photo) return;
   photo.catId = null;
   saveMarks();
-  renderManage();
+  if (state.hideDone) renderManage();
+  else { paintCardBadge(photo); updateSelection(); }
   renderCatLegend();
   renderApplyHint();
 }
@@ -107,47 +137,25 @@ function moveSelection(delta) {
   const i = selectedIndexIn(list);
   const next = Math.min(Math.max(i + delta, 0), list.length - 1);
   selectManagedPhoto(list[next].id);
-  renderManage();
+  updateSelection();
 }
 
 /* ============================================================
    大圖預覽
    ============================================================ */
-function renderPreview() {
-  const wrap = $("previewWrap");
-  if (!wrap) return;
-  const oldImg = wrap.querySelector(".preview-image-box img");
-  if (oldImg && oldImg._ro) oldImg._ro.disconnect();
-  wrap.innerHTML = "";
-
-  const list = manageList();
-  const photo = list[selectedIndexIn(list)];
-  if (!photo) {
-    wrap.innerHTML = '<p class="stat-empty">—</p>';
-    return;
-  }
-
-  const box = document.createElement("div");
-  box.className = "preview-image-box";
-  const img = document.createElement("img");
-  if (photo.thumbUrl) img.src = photo.thumbUrl;   // 先用縮圖頂著, 原圖載完再換
-  box.appendChild(img);
-  wrap.appendChild(box);
-
-  // 照片資訊預設收起來: 這一頁的主角是照片本身, 需要細節才展開。
-  // open 狀態記在模組層, 所以換照片、重畫都不會又闔回去。
+/** 照片資訊那一塊（收合在照片底部）。每次重畫就依目前這張照片重填。 */
+function buildInfoPanel(photo) {
   const info = document.createElement("details");
   info.className = "preview-info";
   info.open = infoOpen;
   info.addEventListener("toggle", () => { infoOpen = info.open; });
+
   const summary = document.createElement("summary");
   const summaryName = document.createElement("span");
   summaryName.className = "preview-summary-name";
   summaryName.textContent = photo.name;
   summary.appendChild(summaryName);
   info.appendChild(summary);
-  // 資訊層放在照片框內並錨定底部；展開時覆蓋照片向上長，不再擠小照片。
-  box.appendChild(info);
 
   const infoBody = document.createElement("div");
   infoBody.className = "preview-info-body";
@@ -183,7 +191,7 @@ function renderPreview() {
     ["focalLength", "焦段"], ["fNumber", "光圈"], ["exposureTime", "快門"], ["iso", "ISO"],
     ["creativeStyle", "創意風格"],
   ];
-  const fillSide = () => {
+  const fill = () => {
     exifWrap.innerHTML = "";
     let any = false;
     if (photo.info) {
@@ -201,24 +209,213 @@ function renderPreview() {
       exifWrap.innerHTML = `<p class="exif-empty">${photo.infoState === "idle" ? "讀取中…" : "無 EXIF"}</p>`;
     }
   };
-  fillSide();
+  fill();
+  info.refresh = fill;
+  return info;
+}
 
-  // 原圖與 EXIF（縮圖流程順便把 EXIF 讀好）
-  PMLibrary.ensureThumb(photo).then(() => { if (currentPhotoId() === photo.id) fillSide(); });
-  PMLibrary.fullUrl(photo).then((url) => {
-    if (!url || currentPhotoId() !== photo.id || !img.isConnected) return;
-    img.src = url;
-    PMExif.applyOrientation(img, photo.info ? photo.info.orientation : null, true);
+/**
+ * 先在畫面外把圖解好, 再換到看得見的那個 <img> 上。
+ * 直接指定 src 的話解碼會發生在下一次繪製, 那一幀就掉了 —— 兩千萬畫素的原圖
+ * 解一次要好幾十毫秒, 一路點下去就是一路頓。
+ */
+async function swapImage(img, url) {
+  const pre = new Image();
+  pre.src = url;
+  // decode() 在背景分頁裡可能永遠不會回來（瀏覽器把繪製整個停掉了）,
+  // 所以同時等 load 事件, 再壓一個上限 —— 不管哪一個先到, 都要把圖換上去。
+  await Promise.race([
+    pre.decode().catch(() => {}),
+    new Promise((done) => { pre.addEventListener("load", done, { once: true }); }),
+    new Promise((done) => { pre.addEventListener("error", done, { once: true }); }),
+    new Promise((done) => setTimeout(done, 400)),
+  ]);
+  img.src = url;
+}
+
+/** 把照片真的塞進某一格。縮圖先頂著, 原圖載完再換。 */
+function fillPane(pane, onInfo) {
+  const photo = pane.photo;
+  if (pane.img.dataset.photoId === photo.id) return;
+  pane.img.dataset.photoId = photo.id;
+
+  if (photo.thumbUrl) pane.img.src = photo.thumbUrl;
+  PMExif.applyOrientation(pane.img, photo.info ? photo.info.orientation : null, true);
+
+  PMLibrary.ensureThumb(photo).then(() => onInfo?.());
+  PMLibrary.fullUrl(photo).then(async (url) => {
+    if (!url || !pane.img.isConnected || pane.img.dataset.photoId !== photo.id) return;
+    await swapImage(pane.img, url);
+    // 等的時候可能又換照片了。
+    if (pane.img.dataset.photoId !== photo.id) return;
+    PMExif.applyOrientation(pane.img, photo.info ? photo.info.orientation : null, true);
+    // 換成原圖後尺寸才是最終的, 這時候重量一次可以拖多遠。
+    pane.remeasure();
   }).catch((err) => console.warn("讀取原圖失敗: ", photo.name, err));
+}
 
-  PMExif.applyOrientation(img, photo.info ? photo.info.orientation : null, true);
+function renderPreview() {
+  const wrap = $("previewWrap");
+  if (!wrap) return;
 
-  PMLibrary.preloadAround(PMLibrary.photos.indexOf(photo), 4, 2);
+  const list = manageList();
+  const photo = list[selectedIndexIn(list)];
+  if (!photo) {
+    endPeek();
+    viewer = null;
+    compareId = null;
+    wrap.innerHTML = '<p class="stat-empty">—</p>';
+    return;
+  }
+
+  // 檢視器只建一次: 重建的話平移縮放會跟著沒了。
+  if (!viewer || !wrap.contains(viewer.node)) {
+    viewer = createViewer({
+      onDropPhoto: setCompare,
+      onExitCompare: () => exitCompare(),
+    });
+    bindPeekButton(viewer.peekButton);
+    wrap.replaceChildren(viewer.node);
+  }
+
+  const other = compareId === photo.id ? null : photoById(compareId);
+  if (compareId && !other) compareId = null;
+
+  const panes = viewer.render(photo, other);
+  // 正在畫面上的（含等一下要偷看的下一張）不能被原圖快取淘汰掉, 不然會變破圖。
+  PMLibrary.pinFull([photo.id, other && other.id, nextPhoto() && nextPhoto().id]);
+  const info = buildInfoPanel(photo);
+  viewer.setInfo(info);
+  panes.forEach((pane) => fillPane(pane, () => info.refresh()));
+
+  preloadSoon(photo);
+}
+
+/**
+ * 預先解好前後幾張原圖（偷看下一張才會是即時的）。
+ * 但一張要解一次原圖, 連點的時候會排一長串在主執行緒上 —— 所以等手停下來才做。
+ */
+let preloadTimer = null;
+function preloadSoon(photo) {
+  clearTimeout(preloadTimer);
+  preloadTimer = setTimeout(() => {
+    PMLibrary.preloadAround(PMLibrary.photos.indexOf(photo), 4, 2);
+  }, 180);
+}
+
+/* ============================================================
+   偷看下一張
+   ------------------------------------------------------------
+   按住 space（或這顆按鈕）就把左邊那一格換成下一張, 放開換回來。
+   換的只有 <img> 的 src —— 平移縮放寫在外面那層,
+   所以畫面位置完全不變, 只有內容閃一下。
+   ============================================================ */
+function nextPhoto() {
+  const list = manageList();
+  return list[selectedIndexIn(list) + 1] || null;
+}
+
+function startPeek() {
+  if (peek || !viewer || !viewer.panes.length) return;
+  const next = nextPhoto();
+  if (!next) return;
+  const pane = viewer.panes[0];
+  const token = {};
+  peek = {
+    token, pane,
+    src: pane.img.src,
+    orientation: pane.photo.info ? pane.photo.info.orientation : null,
+    name: pane.name.textContent,
+  };
+  pane.pane.classList.add("is-peek");
+  PMLibrary.fullUrl(next).then(async (url) => {
+    if (!peek || peek.token !== token || !url) return;
+    await swapImage(pane.img, url);
+    if (!peek || peek.token !== token) return;
+    PMExif.applyOrientation(pane.img, next.info ? next.info.orientation : null, true);
+    pane.name.textContent = next.name;
+  }).catch(() => { /* 讀不到就維持原圖 */ });
+}
+
+function endPeek() {
+  if (!peek) return;
+  const { pane, src, orientation, name } = peek;
+  peek = null;
+  pane.img.src = src;
+  PMExif.applyOrientation(pane.img, orientation, true);
+  pane.name.textContent = name;
+  pane.pane.classList.remove("is-peek");
+}
+
+/** 觸控裝置沒有 space, 所以那顆按鈕也是「按住才看得到」。 */
+function bindPeekButton(btn) {
+  btn.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    startPeek();
+    // 手指滑出按鈕也要能收到放開的事件; 抓不到就算了, pointerleave 會補。
+    try { btn.setPointerCapture(e.pointerId); } catch { /* 沒這個指標就跳過 */ }
+  });
+  ["pointerup", "pointercancel", "pointerleave"].forEach((type) => {
+    btn.addEventListener(type, endPeek);
+  });
 }
 
 /* ============================================================
    縮圖側欄
    ============================================================ */
+/** 某一張的分類角標變了, 只換那一張 —— 不必把整頁縮圖重掛一次。 */
+function paintCardBadge(photo) {
+  const grid = $("manageGrid");
+  const card = grid && grid.querySelector(`[data-photo-id="${photo.id}"]`);
+  if (!card) return;
+  card.querySelector(".cat-badge")?.remove();
+  card.classList.toggle("organized", !!photo.organized);
+
+  if (photo.organized) {
+    const badge = document.createElement("div");
+    badge.className = "cat-badge done";
+    badge.textContent = "\u2713 " + photo.organized.folder;
+    card.appendChild(badge);
+    return;
+  }
+  const cat = photo.catId ? PMCategories.byId(photo.catId) : null;
+  if (!cat) return;
+  const badge = document.createElement("div");
+  badge.className = "cat-badge";
+  badge.style.background = cat.color;
+  badge.textContent = cat.name;
+  card.appendChild(badge);
+}
+
+/**
+ * 只換選取。
+ * 整片重畫要把幾十張縮圖重新掛回 DOM（瀏覽器得再解一次碼）, 點一張就跑一次的話
+ * 會頓在手指底下。同一頁之內換選取其實只有兩個 class 變了, 換掉就好;
+ * 真的換頁了才退回整片重畫。
+ */
+function updateSelection({ scroll = true } = {}) {
+  const grid = $("manageGrid");
+  const list = manageList();
+  if (!grid || !list.length) { renderManage(); return; }
+
+  const selIdx = selectedIndexIn(list);
+  if (Math.floor(selIdx / state.pageSize) !== renderedPage) { renderManage(); return; }
+
+  const selectedId = list[selIdx] ? list[selIdx].id : null;
+  let selectedEl = null;
+  for (const card of grid.children) {
+    const id = card.dataset.photoId;
+    const on = id === selectedId;
+    card.classList.toggle("selected", on);
+    card.classList.toggle("compare", id === compareId);
+    if (on) selectedEl = card;
+  }
+
+  renderPreview();
+  // 用滑鼠點的那一張本來就在畫面上, 不必再捲（scrollIntoView 也是一次強制重排）。
+  if (scroll && selectedEl) selectedEl.scrollIntoView({ block: "nearest" });
+}
+
 function renderManage() {
   const grid = $("manageGrid");
   if (!grid) return;
@@ -235,6 +432,7 @@ function renderManage() {
     empty.style.display = "block";
     empty.querySelector("p").textContent = all.total ? "沒有符合的照片" : "尚未載入照片";
     renderPagination($("managePagination"), 0, 0, () => {});
+    renderedPage = -1;
     renderPreview();
     return;
   }
@@ -246,11 +444,26 @@ function renderManage() {
   const totalPages = Math.max(1, Math.ceil(list.length / state.pageSize));
   const page = Math.floor(selIdx / state.pageSize);
   const start = page * state.pageSize;
+  renderedPage = page;
 
   list.slice(start, start + state.pageSize).forEach((p, localIdx) => {
     const i = start + localIdx;
+    const isMain = i === selIdx;
+    const isCompare = p.id === compareId;
     const card = document.createElement("div");
-    card.className = "thumb-card" + (i === selIdx ? " selected" : "") + (p.organized ? " organized" : "");
+    card.className = "thumb-card"
+      + (isMain ? " selected" : "")
+      + (isCompare ? " compare" : "")
+      + (p.organized ? " organized" : "");
+    card.dataset.photoId = p.id;
+    // 拖到左邊的大圖上就變成左右對照。用自訂型別, 不會跟檔案拖放搞混。
+    card.draggable = true;
+    card.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("application/x-pm-photo", p.id);
+      e.dataTransfer.effectAllowed = "copy";
+      card.classList.add("is-dragging");
+    });
+    card.addEventListener("dragend", () => card.classList.remove("is-dragging"));
 
     const img = document.createElement("img");
     img.alt = p.name;
@@ -278,8 +491,13 @@ function renderManage() {
     }
 
     card.addEventListener("click", () => {
+      // 對照中再點兩張裡的任一張, 就收回成單張 —— 點到的那張留下來。
+      if (compareId && (p.id === state.selectedId || p.id === compareId)) {
+        exitCompare(p.id);
+        return;
+      }
       selectManagedPhoto(p.id);
-      renderManage();
+      updateSelection({ scroll: false });
     });
 
     grid.appendChild(card);
@@ -479,6 +697,10 @@ function fitLayoutHeight() {
 export function mountPage() {
   // 每次進入整理分類頁都從收合狀態開始；同一次操作中換照片則保留使用者選擇。
   infoOpen = false;
+  compareId = null;
+  viewer = null;
+  peek = null;
+  renderedPage = -1;
   // 同步方向以整理分類為準；進入本頁後，下一個編輯工具會採用這裡的目前照片。
   state.editorPhoto = null;
   const grid = $("manageGrid");
@@ -512,6 +734,13 @@ export function mountPage() {
     if (document.querySelector(".modal-overlay.open")) return;
     if (!PMLibrary.photos.length) return;
 
+    if (e.code === "Space") {
+      // 預設會捲動整頁, 一定要擋掉。
+      e.preventDefault();
+      if (!e.repeat) startPeek();
+      return;
+    }
+
     const cols = state.manageColumns;
     switch (e.key) {
       case "ArrowRight": e.preventDefault(); moveSelection(1); return;
@@ -528,13 +757,19 @@ export function mountPage() {
       markCurrent(cat);
     }
   };
+  const onKeyUp = (e) => { if (e.code === "Space") endPeek(); };
+  // 切到別的視窗時鍵盤放開的事件收不到, 會卡在偷看狀態。
+  const onBlur = () => endPeek();
   document.addEventListener("keydown", onKey);
+  document.addEventListener("keyup", onKeyUp);
+  window.addEventListener("blur", onBlur);
 
   renderCatLegend();
   renderManage();
   fitLayoutHeight();
 
-  window.addEventListener("resize", fitLayoutHeight);
+  const onResize = () => { fitLayoutHeight(); viewer?.resize(); };
+  window.addEventListener("resize", onResize);
   const off = onLibraryChange(() => {
     renderCatLegend();
     renderManage();
@@ -542,8 +777,16 @@ export function mountPage() {
     fitLayoutHeight();
   });
   return () => {
+    endPeek();
+    PMLibrary.pinFull([]);
+    clearTimeout(preloadTimer);
+    viewer = null;
+    compareId = null;
+    renderedPage = -1;
     document.removeEventListener("keydown", onKey);
-    window.removeEventListener("resize", fitLayoutHeight);
+    document.removeEventListener("keyup", onKeyUp);
+    window.removeEventListener("blur", onBlur);
+    window.removeEventListener("resize", onResize);
     off();
   };
 }

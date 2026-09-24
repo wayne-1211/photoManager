@@ -29,6 +29,12 @@ const PMLibrary = (function () {
     let idSeq = 0;
     const thumbLRU = new Map();  // id -> photo
     const fullLRU = new Map();   // id -> {photo, url}
+    /**
+     * 正在被某個 <img> 顯示的原圖。
+     * LRU 滿了就會 revokeObjectURL, 但被撤銷的網址如果剛好還掛在畫面上,
+     * 那張圖就會直接變成破圖 —— 所以顯示中的那幾張要先排除在淘汰之外。
+     */
+    let pinnedFull = new Set();
 
     /* ---------- 併發限制 ---------- */
     let running = 0;
@@ -278,13 +284,25 @@ const PMLibrary = (function () {
         const viewBlob = await PMImage.toBrowserBlob(file);
         const url = URL.createObjectURL(viewBlob);
         fullLRU.set(photo.id, { photo, url });
+        evictFull();
+        return url;
+    }
+
+    function evictFull() {
         while (fullLRU.size > MAX_FULL) {
-            const oldestId = fullLRU.keys().next().value;
-            const old = fullLRU.get(oldestId);
-            fullLRU.delete(oldestId);
+            // 從最舊的開始找, 跳過正在畫面上的那幾張。
+            const victim = [...fullLRU.keys()].find(id => !pinnedFull.has(id));
+            if (victim == null) break;   // 全部都釘住了, 這次就不淘汰
+            const old = fullLRU.get(victim);
+            fullLRU.delete(victim);
             if (old) URL.revokeObjectURL(old.url);
         }
-        return url;
+    }
+
+    /** 宣告「這幾張正在畫面上」。傳空的就是都放開。 */
+    function pinFull(ids) {
+        pinnedFull = new Set((ids || []).filter(Boolean));
+        evictFull();
     }
 
     function preloadAround(index, ahead, behind) {
@@ -306,6 +324,7 @@ const PMLibrary = (function () {
         });
         fullLRU.forEach(v => URL.revokeObjectURL(v.url));
         fullLRU.clear();
+        pinnedFull = new Set();
         thumbLRU.clear();
         lib.photos = [];
         lib.mode = null;
@@ -329,7 +348,7 @@ const PMLibrary = (function () {
     return {
         lib,
         supportsFolder, pickFolder, openFolderHandle, rescan, addFiles,
-        getFile, ensureThumb, ensureInfo, scanAllInfo, fullUrl, preloadAround,
+        getFile, ensureThumb, ensureInfo, scanAllInfo, fullUrl, pinFull, preloadAround,
         clear, stats, natCompare,
         get photos() { return lib.photos; },
         get mode() { return lib.mode; },

@@ -198,58 +198,6 @@ export function initSourceBar() {
     emitLibraryChange();
   });
 
-  /* 拖曳: 整個視窗都可以放（支援直接拖資料夾） */
-  let dragDepth = 0;
-  window.addEventListener("dragenter", (e) => {
-    e.preventDefault();
-    dragDepth++;
-    document.body.classList.add("dragging");
-  });
-  window.addEventListener("dragover", (e) => e.preventDefault());
-  window.addEventListener("dragleave", () => {
-    dragDepth = Math.max(0, dragDepth - 1);
-    if (!dragDepth) document.body.classList.remove("dragging");
-  });
-  window.addEventListener("drop", async (e) => {
-    // 提示一定要收掉, 不管這次的檔案是誰接走的。
-    dragDepth = 0;
-    document.body.classList.remove("dragging");
-    // 工具頁自己的拖放區已經處理過的（它會先 preventDefault）, 這裡就不要再搶。
-    if (e.defaultPrevented) return;
-    e.preventDefault();
-
-    // DataTransfer 在 handler 結束後就失效, 必須先同步取出
-    const items = Array.from(e.dataTransfer.items || []);
-    const files = Array.from(e.dataTransfer.files || []);
-    const handlePromises = (PMLibrary.supportsFolder() && items.length
-      && typeof items[0].getAsFileSystemHandle === "function")
-      ? items.map((it) => it.getAsFileSystemHandle())
-      : null;
-
-    if (handlePromises) {
-      try {
-        const handles = await Promise.all(handlePromises);
-        const dir = handles.find((h) => h && h.kind === "directory");
-        if (dir) {
-          detachImages();
-          showProgressText("掃描中…");
-          await PMLibrary.openFolderHandle(dir, {
-            recursive: $("recursiveChk").checked,
-            skipFolders: new Set(PMCategories.all().map((c) => c.folder)),
-            onProgress: (n) => showProgressText(`掃描中… ${n} 張`),
-          });
-          rememberFolder(dir);
-          afterSourceChanged();
-          return;
-        }
-      } catch (err) {
-        console.warn("拖曳資料夾失敗, 改用檔案模式: ", err);
-        hideProgress();
-      }
-    }
-    if (files.length) handleFiles(files);
-  });
-
   /* 不支援 File System Access API 時的說明 */
   if (!PMLibrary.supportsFolder()) {
     $("pickFolderBtn").disabled = true;
